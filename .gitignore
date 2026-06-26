@@ -1,0 +1,32 @@
+# Maven
+forge2iq-backend/target/
+forge2iq-backend/.mvn/wrapper/maven-wrapper.jar
+!forge2iq-backend/.mvn/wrapper/maven-wrapper.properties
+
+# Node
+forge2iq-frontend/node_modules/
+forge2iq-frontend/dist/
+forge2iq-frontend/.vite/
+
+# IDE
+.idea/
+*.iml
+.vscode/
+*.suo
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+/tmp/
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# Spring Boot
+forge2iq-backend/src/main/resources/application-local.properties

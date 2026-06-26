@@ -97,4 +97,34 @@ public class ShiftEntryService {
 
         return ShiftEntryResponse.from(saved);
     }
+
+    public ShiftEntryResponse update(Long id, LogShiftEntryRequest req) {
+        User user = currentUser();
+        ShiftEntry entry = shiftEntryRepository.findById(id)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Shift entry not found"));
+        if (!entry.getCompany().getId().equals(user.getCompany().getId())) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN);
+        }
+
+        int received = req.sheetsReceived() != null ? req.sheetsReceived() : 0;
+        int closingStock = req.openingStock() + received - req.sheetsUsed();
+
+        entry.setProductName(req.productName());
+        entry.setProductType(req.productType());
+        entry.setLine(req.line());
+        entry.setShift(req.shift());
+        entry.setShiftDate(req.shiftDate() != null ? req.shiftDate() : entry.getShiftDate());
+        entry.setOpeningStock(req.openingStock());
+        entry.setSheetsReceived(req.sheetsReceived());
+        entry.setSheetsUsed(req.sheetsUsed());
+        entry.setProductionQty(req.productionQty());
+        entry.setScrap(req.scrap());
+        entry.setClosingStock(closingStock);
+        entry.setOpeningBins(req.openingBins() != null ? req.openingBins() : 0);
+        entry.setClosingBins(req.closingBins() != null ? req.closingBins() : 0);
+        entry.setBatchNumber(req.batchNumber());
+        entry.setOperatorName(req.operatorName());
+
+        return ShiftEntryResponse.from(shiftEntryRepository.save(entry));
+    }
 }

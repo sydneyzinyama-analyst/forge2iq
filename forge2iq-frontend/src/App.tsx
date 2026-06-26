@@ -7,7 +7,6 @@ import UsersPage from './pages/UsersPage'
 import MessagesPage from './pages/MessagesPage'
 import PrintingManagerPage from './pages/PrintingManagerPage'
 import ProductionManagerPage from './pages/ProductionManagerPage'
-import DispatcherPage from './pages/DispatcherPage'
 import OfficeManagerPage from './pages/OfficeManagerPage'
 import AuditLogPage from './pages/AuditLogPage'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -60,7 +59,6 @@ export default function App() {
               <Route index element={<Navigate to="/office" replace />} />
               <Route path="printing"   element={<ErrorBoundary><PrintingManagerPage /></ErrorBoundary>} />
               <Route path="production" element={<ErrorBoundary><ProductionManagerPage /></ErrorBoundary>} />
-              <Route path="dispatch"   element={<ErrorBoundary><DispatcherPage /></ErrorBoundary>} />
               <Route path="office"     element={<ErrorBoundary><OfficeManagerPage /></ErrorBoundary>} />
               <Route path="overview"   element={<ErrorBoundary><DashboardPage /></ErrorBoundary>} />
               <Route path="users"      element={<ErrorBoundary><UsersPage /></ErrorBoundary>} />

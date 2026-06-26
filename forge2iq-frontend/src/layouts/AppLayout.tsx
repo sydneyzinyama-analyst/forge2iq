@@ -30,12 +30,12 @@ interface NavItem {
 const ROLE_META: Record<string, { label: string; color: string; description: string }> = {
   PRINTING_MANAGER:   { label: 'Printing',    color: '#2563EB', description: 'Stock log & dispatch' },
   PRODUCTION_MANAGER: { label: 'Production',  color: '#2563EB', description: 'Log shift entries' },
-  DISPATCHER:         { label: 'Dispatch',    color: '#2563EB', description: 'Confirm dispatches' },
   OFFICE_MANAGER:     { label: 'Office',      color: '#2563EB', description: 'Orders, reports & team' },
   COMPANY_ADMIN:      { label: 'Office',      color: '#2563EB', description: 'Orders, reports & team' },
 }
 
 const SWITCH_ROLES: Role[] = ['OFFICE_MANAGER', 'PRINTING_MANAGER', 'PRODUCTION_MANAGER']
+
 
 function getNavItems(role: Role, unreadMessages: number): NavItem[] {
   const dashboard: NavItem = { label: 'Overview', path: '/overview', icon: <DashboardIcon /> }
@@ -46,8 +46,6 @@ function getNavItems(role: Role, unreadMessages: number): NavItem[] {
       return [dashboard, { label: 'Print Jobs', path: '/printing', icon: <PrintIcon /> }, msg]
     case 'PRODUCTION_MANAGER':
       return [dashboard, { label: 'Shift Log', path: '/production', icon: <FactoryIcon /> }, msg]
-    case 'DISPATCHER':
-      return [dashboard, { label: 'Dispatch Queue', path: '/dispatch', icon: <LocalShippingIcon /> }, msg]
     case 'OFFICE_MANAGER':
     case 'COMPANY_ADMIN':
     default:
@@ -65,7 +63,6 @@ function getHomePath(role: Role): string {
   switch (role) {
     case 'PRINTING_MANAGER':    return '/printing'
     case 'PRODUCTION_MANAGER':  return '/production'
-    case 'DISPATCHER':          return '/dispatch'
     default:                    return '/office'
   }
 }
@@ -100,7 +97,6 @@ export default function AppLayout() {
   useEffect(() => {
     if (location.pathname.startsWith('/printing'))  setPreviewRole('PRINTING_MANAGER')
     else if (location.pathname.startsWith('/production')) setPreviewRole('PRODUCTION_MANAGER')
-    else if (location.pathname.startsWith('/dispatch'))   setPreviewRole('DISPATCHER')
     else if (location.pathname.startsWith('/office') || location.pathname.startsWith('/users') || location.pathname.startsWith('/audit')) setPreviewRole('OFFICE_MANAGER')
   }, [location.pathname, setPreviewRole])
 

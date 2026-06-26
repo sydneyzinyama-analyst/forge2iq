@@ -4,7 +4,7 @@ import {
   DialogActions, TextField, MenuItem, Select, FormControl, InputLabel,
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer,
   Paper, LinearProgress, Alert, InputAdornment, IconButton,
-  Autocomplete, useMediaQuery, useTheme,
+  Autocomplete, useMediaQuery, useTheme, ToggleButton, ToggleButtonGroup,
 } from '@mui/material'
 import { useAutoRefresh } from '../hooks/useAutoRefresh'
 import { ExportButton } from '../components/TableToolbar'
@@ -15,12 +15,15 @@ import LocalShippingIcon from '@mui/icons-material/LocalShipping'
 import SendIcon from '@mui/icons-material/Send'
 import ArrowBackIosNewIcon from '@mui/icons-material/ArrowBackIosNew'
 import ArrowForwardIosIcon from '@mui/icons-material/ArrowForwardIos'
+import EditIcon from '@mui/icons-material/Edit'
+import NoteAddIcon from '@mui/icons-material/NoteAdd'
+import StickyNote2Icon from '@mui/icons-material/StickyNote2'
 import { PDFDownloadLink, PDFViewer } from '@react-pdf/renderer'
 import DownloadIcon from '@mui/icons-material/Download'
 import PrintIcon from '@mui/icons-material/Print'
 import api from '../api/axios'
 import StockLogPDF from '../components/StockLogPDF'
-import type { ShiftEntry, SheetReceipt, PrintingDispatch, PrintingShiftLog, ShiftName, ProductionLine, ProductType, Product } from '../types'
+import type { ShiftEntry, SheetReceipt, PrintingDispatch, PrintingShiftLog, ShiftName, ProductionLine, ProductType, Product, HandoverNote, DispatchEntry } from '../types'
 
 const ALL_LINES: ProductionLine[] = ['LID_LINE_1', 'LID_LINE_2', 'LID_LINE_3', 'BODY_LINE_1', 'BODY_LINE_2', 'BODY_LINE_4']
 const fmtLine = (l: ProductionLine) => l.replace(/_/g, ' ')
@@ -45,6 +48,22 @@ export default function ProductionManagerPage() {
   const [reportOpen, setReportOpen] = useState(false)
   const [reportNotes, setReportNotes] = useState('')
   const [reportSubmitting, setReportSubmitting] = useState(false)
+
+  const [editingEntryId, setEditingEntryId] = useState<number | null>(null)
+
+  const [handoverNotes, setHandoverNotes] = useState<HandoverNote[]>([])
+  const [handoverOpen, setHandoverOpen] = useState(false)
+  const [handoverForm, setHandoverForm] = useState({ fromShift: 'DAY' as ShiftName, notes: '' })
+  const [handoverSubmitting, setHandoverSubmitting] = useState(false)
+
+  const [dispatchEntries, setDispatchEntries] = useState<DispatchEntry[]>([])
+  const [dispatchLogOpen, setDispatchLogOpen] = useState(false)
+  const [dispatchForm, setDispatchForm] = useState({
+    productName: '', productType: 'BODY' as ProductType,
+    binsDispatched: '', destination: '', notes: '', batchNumber: '',
+  })
+  const [dispatchSubmitting, setDispatchSubmitting] = useState(false)
+  const [dispatchFormErrors, setDispatchFormErrors] = useState<Record<string, string>>({})
 
   const [form, setForm] = useState({
     productName: '',
@@ -183,18 +202,22 @@ export default function ProductionManagerPage() {
   const load = async () => {
     try {
       setLoading(true)
-      const [eRes, rRes, pdRes, prRes, slRes] = await Promise.all([
+      const [eRes, rRes, pdRes, prRes, slRes, hnRes, deRes] = await Promise.all([
         api.get<ShiftEntry[]>('/shift-entries'),
         api.get<SheetReceipt[]>('/sheet-receipts'),
         api.get<PrintingDispatch[]>('/printing-dispatches'),
         api.get<Product[]>('/products'),
         api.get<PrintingShiftLog[]>('/printing-shift-logs'),
+        api.get<HandoverNote[]>('/handover-notes'),
+        api.get<DispatchEntry[]>('/dispatch'),
       ])
       setEntries(Array.isArray(eRes.data) ? eRes.data : [])
       setReceipts(Array.isArray(rRes.data) ? rRes.data : [])
       setPrintingDispatches(Array.isArray(pdRes.data) ? pdRes.data : [])
       setProducts(Array.isArray(prRes.data) ? prRes.data : [])
       setPrintingShiftLogs(Array.isArray(slRes.data) ? slRes.data : [])
+      setHandoverNotes(Array.isArray(hnRes.data) ? hnRes.data : [])
+      setDispatchEntries(Array.isArray(deRes.data) ? deRes.data : [])
     } catch {
       setError('Failed to load data')
     } finally {
@@ -225,40 +248,92 @@ export default function ProductionManagerPage() {
     return Object.keys(errs).length === 0
   }
 
+  const resetForm = () => {
+    setForm({
+      productName: '', productType: 'BODY', line: 'BODY_LINE_1', shift: 'DAY',
+      shiftDate: new Date().toISOString().split('T')[0],
+      openingStock: '0', sheetsReceived: '0', sheetsUsed: '', productionQty: '', scrap: '0',
+      openingBins: '0', closingBins: '0', batchNumber: '', operatorName: '',
+    })
+    setEditingEntryId(null)
+    setFormErrors({})
+  }
+
+  const openEdit = (entry: ShiftEntry) => {
+    setForm({
+      productName: entry.productName,
+      productType: entry.productType,
+      line: entry.line,
+      shift: entry.shift,
+      shiftDate: entry.shiftDate,
+      openingStock: String(entry.openingStock),
+      sheetsReceived: String(entry.sheetsReceived ?? 0),
+      sheetsUsed: String(entry.sheetsUsed),
+      productionQty: String(entry.productionQty),
+      scrap: String(entry.scrap),
+      openingBins: String(entry.openingBins),
+      closingBins: String(entry.closingBins),
+      batchNumber: entry.batchNumber ?? '',
+      operatorName: entry.operatorName,
+    })
+    setEditingEntryId(entry.id)
+    setFormErrors({})
+    setLogOpen(true)
+  }
+
   const handleLog = async () => {
     if (!validateForm()) return
     setSubmitting(true)
+    const payload = {
+      workOrderId: null,
+      productName: form.productName,
+      productType: form.productType,
+      line: form.line,
+      shift: form.shift,
+      shiftDate: form.shiftDate,
+      openingStock: Number(form.openingStock),
+      sheetsReceived: editingEntryId ? Number(form.sheetsReceived) || null : effectiveSheetsReceived || null,
+      sheetsUsed: Number(form.sheetsUsed),
+      productionQty: productionQtyNum,
+      scrap: scrapNum,
+      openingBins: Number(form.openingBins) || 0,
+      closingBins: Number(form.closingBins) || 0,
+      batchNumber: form.batchNumber || null,
+      operatorName: form.operatorName,
+    }
     try {
-      await api.post('/shift-entries', {
-        workOrderId: null,
-        productName: form.productName,
-        productType: form.productType,
-        line: form.line,
-        shift: form.shift,
-        shiftDate: form.shiftDate,
-        openingStock: Number(form.openingStock),
-        sheetsReceived: effectiveSheetsReceived || null,
-        sheetsUsed: Number(form.sheetsUsed),
-        productionQty: productionQtyNum,
-        scrap: scrapNum,
-        openingBins: Number(form.openingBins) || 0,
-        closingBins: Number(form.closingBins) || 0,
-        batchNumber: form.batchNumber || null,
-        operatorName: form.operatorName,
-      })
+      if (editingEntryId) {
+        await api.put(`/shift-entries/${editingEntryId}`, payload)
+      } else {
+        await api.post('/shift-entries', payload)
+      }
       setLogOpen(false)
-      setForm({
-        productName: '', productType: 'BODY', line: 'BODY_LINE_1', shift: 'DAY',
-        shiftDate: new Date().toISOString().split('T')[0],
-        openingStock: '0', sheetsReceived: '0', sheetsUsed: '', productionQty: '', scrap: '0',
-        openingBins: '0', closingBins: '0', batchNumber: '', operatorName: '',
-      })
+      resetForm()
       load()
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message
-      setError(msg ?? 'Failed to log entry')
+      setError(msg ?? (editingEntryId ? 'Failed to update entry' : 'Failed to log entry'))
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const handleHandoverSubmit = async () => {
+    if (!handoverForm.notes.trim()) return
+    setHandoverSubmitting(true)
+    try {
+      await api.post('/handover-notes', {
+        fromShift: handoverForm.fromShift,
+        shiftDate: selectedDate,
+        notes: handoverForm.notes.trim(),
+      })
+      setHandoverOpen(false)
+      setHandoverForm({ fromShift: 'DAY', notes: '' })
+      load()
+    } catch {
+      setError('Failed to save handover note')
+    } finally {
+      setHandoverSubmitting(false)
     }
   }
 
@@ -274,6 +349,35 @@ export default function ProductionManagerPage() {
       setError('Failed to confirm receipt')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const handleDispatchSubmit = async () => {
+    const errs: Record<string, string> = {}
+    if (!dispatchForm.productName.trim()) errs.productName = 'Product name is required'
+    const bins = Number(dispatchForm.binsDispatched)
+    if (!dispatchForm.binsDispatched || isNaN(bins) || bins <= 0) errs.binsDispatched = 'Must be greater than 0'
+    setDispatchFormErrors(errs)
+    if (Object.keys(errs).length > 0) return
+    setDispatchSubmitting(true)
+    try {
+      await api.post('/dispatch', {
+        productName: dispatchForm.productName.trim(),
+        productType: dispatchForm.productType,
+        binsExpected: bins,
+        binsDispatched: bins,
+        destination: dispatchForm.destination.trim() || null,
+        notes: dispatchForm.notes.trim() || null,
+        batchNumber: dispatchForm.batchNumber.trim() || null,
+      })
+      setDispatchLogOpen(false)
+      setDispatchForm({ productName: '', productType: 'BODY', binsDispatched: '', destination: '', notes: '', batchNumber: '' })
+      setDispatchFormErrors({})
+      load()
+    } catch {
+      setError('Failed to log dispatch')
+    } finally {
+      setDispatchSubmitting(false)
     }
   }
 
@@ -354,6 +458,42 @@ export default function ProductionManagerPage() {
   const totalScrap = dateEntries.reduce((s, e) => s + e.scrap, 0)
   const scrapRate = totalUnits > 0 ? ((totalScrap / (totalUnits + totalScrap)) * 100).toFixed(1) : '0.0'
 
+  const [statsPeriod, setStatsPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily')
+
+  const getWeekRange = (dateStr: string) => {
+    const d = new Date(dateStr)
+    const day = d.getDay() === 0 ? 6 : d.getDay() - 1 // Monday=0
+    const mon = new Date(d); mon.setDate(d.getDate() - day)
+    const sun = new Date(mon); sun.setDate(mon.getDate() + 6)
+    return {
+      start: mon.toISOString().split('T')[0],
+      end: sun.toISOString().split('T')[0],
+    }
+  }
+
+  const weekRange = getWeekRange(selectedDate)
+  const monthPrefix = selectedDate.slice(0, 7) // "YYYY-MM"
+
+  const periodEntries = statsPeriod === 'daily'
+    ? dateEntries
+    : statsPeriod === 'weekly'
+      ? entries.filter(e => e.shiftDate >= weekRange.start && e.shiftDate <= weekRange.end)
+      : entries.filter(e => e.shiftDate.startsWith(monthPrefix))
+
+  const periodReceipts = statsPeriod === 'daily'
+    ? dateReceipts
+    : statsPeriod === 'weekly'
+      ? receipts.filter(r => r.receivedAt.slice(0, 10) >= weekRange.start && r.receivedAt.slice(0, 10) <= weekRange.end)
+      : receipts.filter(r => r.receivedAt.startsWith(monthPrefix))
+
+  const periodUnits = periodEntries.reduce((s, e) => s + e.productionQty, 0)
+  const periodScrap = periodEntries.reduce((s, e) => s + e.scrap, 0)
+  const periodScrapRate = periodUnits > 0 ? ((periodScrap / (periodUnits + periodScrap)) * 100).toFixed(1) : '0.0'
+  const periodSheets = periodReceipts.reduce((s, r) => s + r.sheetsReceived, 0)
+  const periodDays = statsPeriod === 'daily'
+    ? dateEntries.length
+    : new Set(periodEntries.map(e => e.shiftDate)).size
+
   const navigateDate = (delta: number) => {
     const d = new Date(selectedDate)
     d.setDate(d.getDate() + delta)
@@ -383,8 +523,14 @@ export default function ProductionManagerPage() {
           </Box>
         </Box>
         <Box sx={{ display: 'flex', gap: 1.5 }}>
-          <Button variant="outlined" startIcon={<AddIcon />} onClick={() => setLogOpen(true)}>
+          <Button variant="outlined" startIcon={<AddIcon />} onClick={() => { resetForm(); setLogOpen(true) }}>
             Log Shift Entry
+          </Button>
+          <Button variant="outlined" startIcon={<LocalShippingIcon />} onClick={() => setDispatchLogOpen(true)} color="success">
+            Log Dispatch
+          </Button>
+          <Button variant="outlined" startIcon={<NoteAddIcon />} onClick={() => setHandoverOpen(true)} color="warning">
+            Handover Note
           </Button>
           <Button variant="contained" startIcon={<SendIcon />} onClick={() => setReportOpen(true)}>
             Send 24hr Report
@@ -411,13 +557,39 @@ export default function ProductionManagerPage() {
             <ArrowForwardIosIcon fontSize="small" />
           </IconButton>
           {selectedDate === todayStr && <Chip label="Today" size="small" color="primary" sx={{ fontWeight: 700 }} />}
+          <ToggleButtonGroup
+            value={statsPeriod}
+            exclusive
+            onChange={(_, v) => { if (v) setStatsPeriod(v) }}
+            size="small"
+            sx={{ ml: 'auto' }}
+          >
+            <ToggleButton value="daily" sx={{ px: 2, fontSize: 12, fontWeight: 600 }}>Daily</ToggleButton>
+            <ToggleButton value="weekly" sx={{ px: 2, fontSize: 12, fontWeight: 600 }}>Weekly</ToggleButton>
+            <ToggleButton value="monthly" sx={{ px: 2, fontSize: 12, fontWeight: 600 }}>Monthly</ToggleButton>
+          </ToggleButtonGroup>
         </Box>
+
+        {statsPeriod === 'weekly' && (
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            Week: {weekRange.start} — {weekRange.end}
+          </Typography>
+        )}
+        {statsPeriod === 'monthly' && (
+          <Typography variant="caption" color="text.secondary" sx={{ mt: 1, display: 'block' }}>
+            Month: {new Date(selectedDate).toLocaleString('default', { month: 'long', year: 'numeric' })}
+          </Typography>
+        )}
+
         <Box sx={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', mt: 2, borderTop: '1px solid #E2E8F0', pt: 1.5 }}>
           {[
-            { label: 'Entries', value: dateEntries.length },
-            { label: 'Units Produced', value: totalUnits.toLocaleString() },
-            { label: 'Scrap Rate', value: `${scrapRate}%` },
-            { label: 'Sheets Received', value: totalSheetsDate.toLocaleString() },
+            {
+              label: statsPeriod === 'daily' ? 'Entries' : 'Active Days',
+              value: periodDays,
+            },
+            { label: 'Units Produced', value: periodUnits.toLocaleString() },
+            { label: 'Scrap Rate', value: `${periodScrapRate}%` },
+            { label: 'Sheets Received', value: periodSheets.toLocaleString() },
           ].map(s => (
             <Box key={s.label} sx={{ textAlign: 'center' }}>
               <Typography fontWeight={700} fontSize={{ xs: 16, md: 18 }} color="text.primary">{s.value}</Typography>
@@ -597,11 +769,11 @@ export default function ProductionManagerPage() {
                       <TableCell colSpan={4} align="center" sx={thNight}>🌙 NIGHT SHIFT</TableCell>
                     </TableRow>
                     <TableRow>
-                      {['Description', 'Batch', 'Sheets Used', 'Prod. Qty', 'Scrap'].map(h => (
-                        <TableCell key={`d-${h}`} sx={{ ...thSub, width: h === 'Description' ? '18%' : h === 'Batch' ? '12%' : undefined }}>{h}</TableCell>
+                      {['Description', 'Batch', 'Sheets Used', 'Prod. Qty', 'Scrap', ''].map(h => (
+                        <TableCell key={`d-${h}`} sx={{ ...thSub, width: h === 'Description' ? '18%' : h === 'Batch' ? '12%' : h === '' ? '40px' : undefined }}>{h}</TableCell>
                       ))}
-                      {['Description', 'Batch', 'Sheets Used', 'Prod. Qty', 'Scrap'].map(h => (
-                        <TableCell key={`n-${h}`} sx={{ ...thSub, bgcolor: '#F1F5F9', width: h === 'Description' ? '18%' : h === 'Batch' ? '12%' : undefined }}>{h}</TableCell>
+                      {['Description', 'Batch', 'Sheets Used', 'Prod. Qty', 'Scrap', ''].map(h => (
+                        <TableCell key={`n-${h}`} sx={{ ...thSub, bgcolor: '#F1F5F9', width: h === 'Description' ? '18%' : h === 'Batch' ? '12%' : h === '' ? '40px' : undefined }}>{h}</TableCell>
                       ))}
                     </TableRow>
                   </TableHead>
@@ -617,8 +789,15 @@ export default function ProductionManagerPage() {
                           </TableCell>
                           <TableCell align="right" sx={tdDay}>{d ? d.sheetsUsed.toLocaleString() : ''}</TableCell>
                           <TableCell align="right" sx={{ ...tdDay, fontWeight: 700 }}>{d ? d.productionQty.toLocaleString() : ''}</TableCell>
-                          <TableCell align="right" sx={{ ...tdDay, color: d && d.scrap > 0 ? '#DC2626' : undefined, borderRight: '2px solid #E5E7EB' }}>
+                          <TableCell align="right" sx={{ ...tdDay, color: d && d.scrap > 0 ? '#DC2626' : undefined }}>
                             {d ? d.scrap.toLocaleString() : ''}
+                          </TableCell>
+                          <TableCell sx={{ borderRight: '2px solid #E5E7EB', p: 0.5 }}>
+                            {d && (
+                              <IconButton size="small" onClick={() => openEdit(d)} title="Edit entry">
+                                <EditIcon sx={{ fontSize: 15, color: '#64748B' }} />
+                              </IconButton>
+                            )}
                           </TableCell>
                           <TableCell sx={{ ...tdNight, fontWeight: 500 }}>{n?.productName ?? ''}</TableCell>
                           <TableCell sx={{ ...tdNight, fontFamily: 'monospace', fontSize: 11, color: '#94A3B8', fontWeight: 700 }}>
@@ -629,6 +808,13 @@ export default function ProductionManagerPage() {
                           <TableCell align="right" sx={{ ...tdNight, color: n && n.scrap > 0 ? '#DC2626' : undefined }}>
                             {n ? n.scrap.toLocaleString() : ''}
                           </TableCell>
+                          <TableCell sx={{ p: 0.5 }}>
+                            {n && (
+                              <IconButton size="small" onClick={() => openEdit(n)} title="Edit entry">
+                                <EditIcon sx={{ fontSize: 15, color: '#64748B' }} />
+                              </IconButton>
+                            )}
+                          </TableCell>
                         </TableRow>
                       )
                     })}
@@ -637,9 +823,10 @@ export default function ProductionManagerPage() {
                       <TableCell sx={tdTotal} />
                       <TableCell align="right" sx={tdTotal}>{de.length > 0 ? dTotSheets.toLocaleString() : ''}</TableCell>
                       <TableCell align="right" sx={{ ...tdTotal, fontWeight: 700 }}>{de.length > 0 ? dTotQty.toLocaleString() : ''}</TableCell>
-                      <TableCell align="right" sx={{ ...tdTotal, color: dTotScrap > 0 ? '#DC2626' : undefined, borderRight: '2px solid #E5E7EB' }}>
+                      <TableCell align="right" sx={{ ...tdTotal, color: dTotScrap > 0 ? '#DC2626' : undefined }}>
                         {de.length > 0 ? dTotScrap.toLocaleString() : ''}
                       </TableCell>
+                      <TableCell sx={{ ...tdTotal, borderRight: '2px solid #E5E7EB' }} />
                       <TableCell sx={{ ...tdTotal, color: '#6B7280', fontSize: 11, letterSpacing: 0.5 }}>TOTAL</TableCell>
                       <TableCell sx={tdTotal} />
                       <TableCell align="right" sx={tdTotal}>{ne.length > 0 ? nTotSheets.toLocaleString() : ''}</TableCell>
@@ -647,6 +834,7 @@ export default function ProductionManagerPage() {
                       <TableCell align="right" sx={{ ...tdTotal, color: nTotScrap > 0 ? '#DC2626' : undefined }}>
                         {ne.length > 0 ? nTotScrap.toLocaleString() : ''}
                       </TableCell>
+                      <TableCell sx={tdTotal} />
                     </TableRow>
                   </TableBody>
                 </Table>
@@ -783,9 +971,9 @@ export default function ProductionManagerPage() {
       </Dialog>
 
       {/* Log shift entry dialog */}
-      <Dialog open={logOpen} onClose={() => { setLogOpen(false); setFormErrors({}) }} maxWidth="md" fullWidth fullScreen={fullScreen}>
+      <Dialog open={logOpen} onClose={() => { setLogOpen(false); resetForm() }} maxWidth="md" fullWidth fullScreen={fullScreen}>
         <DialogTitle sx={{ fontWeight: 700, fontSize: 18 }}>
-          Log Shift Entry — {form.shift === 'DAY' ? 'Day Shift' : 'Night Shift'}
+          {editingEntryId ? 'Edit Shift Entry' : 'Log Shift Entry'} — {form.shift === 'DAY' ? 'Day Shift' : 'Night Shift'}
         </DialogTitle>
 
         <DialogContent sx={{ pt: '20px !important', pb: 1 }}>
@@ -1034,7 +1222,7 @@ export default function ProductionManagerPage() {
         </DialogContent>
 
         <DialogActions sx={{ px: 3, py: 2, borderTop: '1px solid #E5E7EB', gap: 1 }}>
-          <Button size="large" onClick={() => setLogOpen(false)}>Cancel</Button>
+          <Button size="large" onClick={() => { setLogOpen(false); resetForm() }}>Cancel</Button>
           <Button
             size="large"
             variant="contained"
@@ -1042,7 +1230,7 @@ export default function ProductionManagerPage() {
             disabled={submitting || !form.productName || !form.sheetsUsed || !form.productionQty || !form.operatorName}
             sx={{ px: 4, fontWeight: 700, fontSize: 15 }}
           >
-            {submitting ? 'Saving…' : `Save ${form.shift === 'DAY' ? 'Day' : 'Night'} Shift Entry`}
+            {submitting ? 'Saving…' : editingEntryId ? 'Save Changes' : `Save ${form.shift === 'DAY' ? 'Day' : 'Night'} Shift Entry`}
           </Button>
         </DialogActions>
       </Dialog>
@@ -1135,6 +1323,245 @@ export default function ProductionManagerPage() {
             onClick={handleSendReport}
           >
             {reportSubmitting ? 'Sending…' : 'Send Report to Office'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Dispatched to Dispatcher */}
+      <Paper sx={{ mt: 3, overflow: 'hidden' }}>
+        <Box sx={{
+          p: 2, bgcolor: '#F0FDF4', borderBottom: '1px solid #BBF7D0',
+          display: 'flex', alignItems: 'center', gap: 1.5,
+        }}>
+          <LocalShippingIcon sx={{ color: '#16A34A' }} />
+          <Box sx={{ flex: 1 }}>
+            <Typography fontWeight={700} color="#14532D">Dispatched to Dispatcher</Typography>
+            <Typography variant="caption" color="#16A34A">Finished bins logged by production and handed to dispatch</Typography>
+          </Box>
+          <Chip
+            label={`${dispatchEntries.filter(d => d.dispatchedAt.startsWith(selectedDate)).length} today`}
+            size="small"
+            sx={{ fontWeight: 700, bgcolor: '#DCFCE7', color: '#14532D' }}
+          />
+        </Box>
+        {dispatchEntries.length === 0 ? (
+          <Box sx={{ p: 3, textAlign: 'center' }}>
+            <Typography fontSize={14} color="text.secondary">No dispatches logged yet</Typography>
+            <Button size="small" startIcon={<LocalShippingIcon />} onClick={() => setDispatchLogOpen(true)} sx={{ mt: 1, color: '#16A34A' }}>
+              Log first dispatch
+            </Button>
+          </Box>
+        ) : (
+          <TableContainer>
+            <Table size="small">
+              <TableHead>
+                <TableRow sx={{ '& th': { fontWeight: 700, bgcolor: '#F9FAFB', fontSize: 12 } }}>
+                  <TableCell>Date & Time</TableCell>
+                  <TableCell>Product</TableCell>
+                  <TableCell>Type</TableCell>
+                  <TableCell>Batch</TableCell>
+                  <TableCell align="right">Bins</TableCell>
+                  <TableCell>Destination</TableCell>
+                  <TableCell>Notes</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {dispatchEntries.map(d => (
+                  <TableRow key={d.id} hover sx={{ bgcolor: d.dispatchedAt.startsWith(selectedDate) ? '#F0FDF4' : undefined }}>
+                    <TableCell sx={{ fontSize: 12, color: 'text.secondary', whiteSpace: 'nowrap' }}>
+                      {new Date(d.dispatchedAt).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </TableCell>
+                    <TableCell sx={{ fontWeight: 600 }}>{d.productName ?? '—'}</TableCell>
+                    <TableCell>
+                      {d.productType && <Chip label={d.productType} size="small" sx={{ fontSize: 10 }} />}
+                    </TableCell>
+                    <TableCell sx={{ fontFamily: 'monospace', fontSize: 11, fontWeight: 700 }}>{d.batchNumber ?? '—'}</TableCell>
+                    <TableCell align="right" sx={{ fontWeight: 700, color: '#16A34A' }}>{d.binsDispatched.toLocaleString()}</TableCell>
+                    <TableCell sx={{ fontSize: 12 }}>{d.destination ?? '—'}</TableCell>
+                    <TableCell sx={{ fontSize: 12, color: 'text.secondary' }}>{d.notes ?? '—'}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
+        )}
+      </Paper>
+
+      {/* Log Dispatch Dialog */}
+      <Dialog open={dispatchLogOpen} onClose={() => { setDispatchLogOpen(false); setDispatchFormErrors({}) }} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>Log Dispatch to Dispatcher</DialogTitle>
+        <DialogContent sx={{ pt: '16px !important', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+            <TextField
+              label="Product Name"
+              fullWidth
+              value={dispatchForm.productName}
+              onChange={e => setDispatchForm(f => ({ ...f, productName: e.target.value }))}
+              error={!!dispatchFormErrors.productName}
+              helperText={dispatchFormErrors.productName}
+            />
+            <FormControl fullWidth>
+              <InputLabel>Product Type</InputLabel>
+              <Select value={dispatchForm.productType} label="Product Type"
+                onChange={e => setDispatchForm(f => ({ ...f, productType: e.target.value as ProductType }))}>
+                <MenuItem value="LID">LID</MenuItem>
+                <MenuItem value="BODY">BODY</MenuItem>
+              </Select>
+            </FormControl>
+          </Box>
+          <Box sx={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 2 }}>
+            <TextField
+              label="Batch Number"
+              fullWidth
+              value={dispatchForm.batchNumber}
+              onChange={e => setDispatchForm(f => ({ ...f, batchNumber: e.target.value }))}
+              sx={{ '& input': { fontFamily: 'monospace', fontWeight: 700 } }}
+            />
+            <TextField
+              label="Bins Dispatched"
+              type="number"
+              fullWidth
+              value={dispatchForm.binsDispatched}
+              onChange={e => setDispatchForm(f => ({ ...f, binsDispatched: e.target.value }))}
+              error={!!dispatchFormErrors.binsDispatched}
+              helperText={dispatchFormErrors.binsDispatched}
+              inputProps={{ min: 1 }}
+            />
+          </Box>
+          <TextField
+            label="Destination (optional)"
+            fullWidth
+            placeholder="e.g. Warehouse Bay 3, Cold Storage, Customer Name"
+            value={dispatchForm.destination}
+            onChange={e => setDispatchForm(f => ({ ...f, destination: e.target.value }))}
+          />
+          <TextField
+            label="Notes (optional)"
+            fullWidth
+            multiline
+            rows={2}
+            value={dispatchForm.notes}
+            onChange={e => setDispatchForm(f => ({ ...f, notes: e.target.value }))}
+          />
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => { setDispatchLogOpen(false); setDispatchFormErrors({}) }}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="success"
+            startIcon={<LocalShippingIcon />}
+            disabled={dispatchSubmitting}
+            onClick={handleDispatchSubmit}
+            sx={{ fontWeight: 700 }}
+          >
+            {dispatchSubmitting ? 'Logging…' : 'Log Dispatch'}
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Handover Notes */}
+      {(() => {
+        const dateHandoverNotes = handoverNotes.filter(n => n.shiftDate === selectedDate)
+        return (
+          <Paper sx={{ mt: 3, overflow: 'hidden' }}>
+            <Box sx={{
+              p: 2, bgcolor: '#FFFBEB', borderBottom: '1px solid #FDE68A',
+              display: 'flex', alignItems: 'center', gap: 1.5,
+            }}>
+              <StickyNote2Icon sx={{ color: '#D97706' }} />
+              <Box sx={{ flex: 1 }}>
+                <Typography fontWeight={700} color="#92400E">Shift Handover Notes</Typography>
+                <Typography variant="caption" color="#A16207">
+                  Notes left by outgoing shift supervisors for the incoming shift
+                </Typography>
+              </Box>
+              <Chip label={`${dateHandoverNotes.length} note${dateHandoverNotes.length !== 1 ? 's' : ''}`} size="small"
+                sx={{ fontWeight: 700, bgcolor: '#FEF3C7', color: '#92400E' }} />
+            </Box>
+            {dateHandoverNotes.length === 0 ? (
+              <Box sx={{ p: 3, textAlign: 'center' }}>
+                <Typography fontSize={14} color="text.secondary">No handover notes for this date</Typography>
+                <Button size="small" startIcon={<NoteAddIcon />} onClick={() => setHandoverOpen(true)} sx={{ mt: 1, color: '#D97706' }}>
+                  Add a note
+                </Button>
+              </Box>
+            ) : (
+              <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+                {dateHandoverNotes.map(note => (
+                  <Box key={note.id} sx={{
+                    p: 2, borderRadius: 2,
+                    bgcolor: note.fromShift === 'DAY' ? '#FFFBEB' : '#1E293B',
+                    border: note.fromShift === 'DAY' ? '1px solid #FDE68A' : '1px solid #334155',
+                  }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 1 }}>
+                      <Chip
+                        label={note.fromShift === 'DAY' ? '☀ Day Shift Handover' : '🌙 Night Shift Handover'}
+                        size="small"
+                        sx={{
+                          fontWeight: 700, fontSize: 11,
+                          bgcolor: note.fromShift === 'DAY' ? '#FEF3C7' : '#334155',
+                          color: note.fromShift === 'DAY' ? '#92400E' : '#CBD5E1',
+                        }}
+                      />
+                      <Typography variant="caption" sx={{ color: note.fromShift === 'DAY' ? '#A16207' : '#94A3B8', ml: 'auto' }}>
+                        {note.writtenBy ?? 'Unknown'} · {new Date(note.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </Typography>
+                    </Box>
+                    <Typography fontSize={14} sx={{
+                      whiteSpace: 'pre-line',
+                      color: note.fromShift === 'DAY' ? '#1C1917' : '#E2E8F0',
+                    }}>
+                      {note.notes}
+                    </Typography>
+                  </Box>
+                ))}
+              </Box>
+            )}
+          </Paper>
+        )
+      })()}
+
+      {/* Handover Note Dialog */}
+      <Dialog open={handoverOpen} onClose={() => { setHandoverOpen(false); setHandoverForm({ fromShift: 'DAY', notes: '' }) }} maxWidth="sm" fullWidth>
+        <DialogTitle sx={{ fontWeight: 700 }}>Add Shift Handover Note</DialogTitle>
+        <DialogContent sx={{ pt: '16px !important', display: 'flex', flexDirection: 'column', gap: 2 }}>
+          <Alert severity="info" sx={{ fontSize: 13 }}>
+            This note will be visible to the incoming shift on <strong>{selectedDate}</strong>.
+            Use it to flag issues, in-progress work, or anything the next shift needs to know.
+          </Alert>
+          <FormControl fullWidth>
+            <InputLabel>Outgoing Shift</InputLabel>
+            <Select
+              value={handoverForm.fromShift}
+              label="Outgoing Shift"
+              onChange={e => setHandoverForm(f => ({ ...f, fromShift: e.target.value as ShiftName }))}
+            >
+              <MenuItem value="DAY">☀ Day Shift (handing over to Night)</MenuItem>
+              <MenuItem value="NIGHT">🌙 Night Shift (handing over to Day)</MenuItem>
+            </Select>
+          </FormControl>
+          <TextField
+            label="Handover Notes"
+            multiline
+            rows={5}
+            fullWidth
+            placeholder={'e.g. Line 2 has a bearing issue — maintenance called.\nBatch AB-221 is 60% done, closing stock is 1,200 sheets.\nBody Line 1 was running slow all shift — monitor.'}
+            value={handoverForm.notes}
+            onChange={e => setHandoverForm(f => ({ ...f, notes: e.target.value }))}
+            inputProps={{ maxLength: 2000 }}
+            helperText={`${handoverForm.notes.length}/2000`}
+          />
+        </DialogContent>
+        <DialogActions sx={{ px: 3, pb: 2 }}>
+          <Button onClick={() => { setHandoverOpen(false); setHandoverForm({ fromShift: 'DAY', notes: '' }) }}>Cancel</Button>
+          <Button
+            variant="contained"
+            color="warning"
+            disabled={handoverSubmitting || !handoverForm.notes.trim()}
+            startIcon={<NoteAddIcon />}
+            onClick={handleHandoverSubmit}
+          >
+            {handoverSubmitting ? 'Saving…' : 'Save Handover Note'}
           </Button>
         </DialogActions>
       </Dialog>

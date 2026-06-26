@@ -26,4 +26,9 @@ public class ShiftEntryController {
     public ShiftEntryResponse log(@RequestBody LogShiftEntryRequest request) {
         return shiftEntryService.log(request);
     }
+
+    @PutMapping("/{id}")
+    public ShiftEntryResponse update(@PathVariable Long id, @RequestBody LogShiftEntryRequest request) {
+        return shiftEntryService.update(id, request);
+    }
 }

@@ -4,7 +4,7 @@ import {
   DialogActions, TextField, MenuItem, Select, FormControl, InputLabel,
   Table, TableHead, TableBody, TableRow, TableCell, TableContainer,
   Paper, LinearProgress, Alert, IconButton, Divider,
-  useMediaQuery, useTheme,
+  useMediaQuery, useTheme, ToggleButton, ToggleButtonGroup,
 } from '@mui/material'
 import PrintIcon from '@mui/icons-material/Print'
 import AddIcon from '@mui/icons-material/Add'
@@ -246,6 +246,39 @@ export default function PrintingManagerPage() {
   const todayDispatches = dispatches.filter(d => d.dispatchDate === todayStr)
   const totalSheetsDispatchedToday = todayDispatches.reduce((s, d) => s + d.sheetsDispatched, 0)
 
+  const [statsPeriod, setStatsPeriod] = useState<'daily' | 'weekly' | 'monthly'>('daily')
+
+  const getWeekRange = (dateStr: string) => {
+    const d = new Date(dateStr)
+    const day = d.getDay() === 0 ? 6 : d.getDay() - 1
+    const mon = new Date(d); mon.setDate(d.getDate() - day)
+    const sun = new Date(mon); sun.setDate(mon.getDate() + 6)
+    return { start: mon.toISOString().split('T')[0], end: sun.toISOString().split('T')[0] }
+  }
+
+  const weekRange = getWeekRange(todayStr)
+  const monthPrefix = todayStr.slice(0, 7)
+
+  const periodDispatches = statsPeriod === 'daily'
+    ? todayDispatches
+    : statsPeriod === 'weekly'
+      ? dispatches.filter(d => d.dispatchDate >= weekRange.start && d.dispatchDate <= weekRange.end)
+      : dispatches.filter(d => d.dispatchDate.startsWith(monthPrefix))
+
+  const periodLogs = statsPeriod === 'daily'
+    ? shiftLogs.filter(l => l.logDate === todayStr)
+    : statsPeriod === 'weekly'
+      ? shiftLogs.filter(l => l.logDate >= weekRange.start && l.logDate <= weekRange.end)
+      : shiftLogs.filter(l => l.logDate.startsWith(monthPrefix))
+
+  const periodSheets = periodDispatches.reduce((s, d) => s + d.sheetsDispatched, 0)
+
+  const periodLabel = statsPeriod === 'daily'
+    ? 'Today'
+    : statsPeriod === 'weekly'
+      ? `${weekRange.start} — ${weekRange.end}`
+      : new Date(todayStr).toLocaleString('default', { month: 'long', year: 'numeric' })
+
   // Table controls for dispatches and stock logs
   const dispatchTC = useTableControls(dispatches, ['productName', 'productType', 'dispatchedBy', 'shift', 'dispatchDate'], {
     defaultSortKey: 'dispatchDate', defaultSortDir: 'desc',
@@ -278,19 +311,37 @@ export default function PrintingManagerPage() {
       </Paper>
 
       {/* Stats */}
-      <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }, gap: 2, mb: 3 }}>
-        {[
-          { label: 'Stock Logs Total',           value: shiftLogs.length },
-          { label: 'Dispatches Today',            value: todayDispatches.length },
-          { label: 'Sheets to Production Today',  value: totalSheetsDispatchedToday.toLocaleString() },
-          { label: 'Total Dispatches',            value: dispatches.length },
-        ].map(s => (
-          <Paper key={s.label} sx={{ p: 2.5, borderLeft: '4px solid #E2E8F0' }}>
-            <Typography variant="h4" fontWeight={700} color="text.primary">{s.value}</Typography>
-            <Typography variant="caption" color="text.secondary">{s.label}</Typography>
-          </Paper>
-        ))}
-      </Box>
+      <Paper sx={{ mb: 3, p: 2 }}>
+        <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 1, mb: 2 }}>
+          <Box>
+            <Typography fontWeight={700} fontSize={14} color="text.primary">Overview</Typography>
+            <Typography variant="caption" color="text.secondary">{periodLabel}</Typography>
+          </Box>
+          <ToggleButtonGroup
+            value={statsPeriod}
+            exclusive
+            onChange={(_, v) => { if (v) setStatsPeriod(v) }}
+            size="small"
+          >
+            <ToggleButton value="daily" sx={{ px: 2, fontSize: 12, fontWeight: 600 }}>Daily</ToggleButton>
+            <ToggleButton value="weekly" sx={{ px: 2, fontSize: 12, fontWeight: 600 }}>Weekly</ToggleButton>
+            <ToggleButton value="monthly" sx={{ px: 2, fontSize: 12, fontWeight: 600 }}>Monthly</ToggleButton>
+          </ToggleButtonGroup>
+        </Box>
+        <Box sx={{ display: 'grid', gridTemplateColumns: { xs: 'repeat(2, 1fr)', md: 'repeat(4, 1fr)' }, gap: 2 }}>
+          {[
+            { label: 'Stock Logs', value: periodLogs.length },
+            { label: 'Dispatches', value: periodDispatches.length },
+            { label: 'Sheets to Production', value: periodSheets.toLocaleString() },
+            { label: 'All-Time Dispatches', value: dispatches.length },
+          ].map(s => (
+            <Box key={s.label} sx={{ p: 2, borderRadius: 2, bgcolor: '#F8FAFC', border: '1px solid #E2E8F0' }}>
+              <Typography variant="h4" fontWeight={700} color="text.primary">{s.value}</Typography>
+              <Typography variant="caption" color="text.secondary">{s.label}</Typography>
+            </Box>
+          ))}
+        </Box>
+      </Paper>
 
       {error && <Alert severity="error" sx={{ mb: 2 }} onClose={() => setError('')}>{error}</Alert>}
       {loading && <LinearProgress sx={{ mb: 2 }} />}

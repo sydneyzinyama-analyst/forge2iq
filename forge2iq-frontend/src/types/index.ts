@@ -217,6 +217,15 @@ export interface Product {
   createdAt: string
 }
 
+export interface HandoverNote {
+  id: number
+  fromShift: ShiftName
+  shiftDate: string
+  notes: string
+  writtenBy: string | null
+  createdAt: string
+}
+
 export interface UnreadCount { count: number }
 
 export interface AuditLog {
